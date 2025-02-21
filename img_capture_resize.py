@@ -3,7 +3,7 @@ import os
 from datetime import datetime
 import time
 
-def capture_frame(cap, save_folder='captured_frames'):
+def capture_frame(cap, save_folder='captured_frames', frame_size=(608, 608)):
     # 저장할 폴더 경로 설정
     if not os.path.exists(save_folder):
         os.makedirs(save_folder)
@@ -14,12 +14,15 @@ def capture_frame(cap, save_folder='captured_frames'):
         print('프레임에 실패하여 루프를 나갑니다.')
         return
 
+    # 프레임 캡처 및 리사이즈
+    resized_frame = cv.resize(frame, frame_size)
+    
     # 현재 시간을 파일 이름으로 설정 (밀리초 포함)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-3]
     frame_path = os.path.join(save_folder, f'{timestamp}.jpg')
     
     # 이미지 저장
-    cv.imwrite(frame_path, frame)
+    cv.imwrite(frame_path, resized_frame)
     print(f'프레임이 {frame_path}에 저장되었습니다.')
 
     return frame_path
