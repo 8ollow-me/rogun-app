@@ -5,9 +5,10 @@ import pandas as pd
 import os
 import cv2 as cv
 
-from utils import get_dataframe_row
+from src.utils import get_dataframe_row, image_to_base64
+from src.img_capture import capture_start, capture_finish, capture_frame
 
-PLACEHOLDERS = ['resources/placeholder.png', 'resources/placeholder2.png']
+PLACEHOLDER = 'resources/placeholder.png'
 BEEPS = {
     '알림음 끄기': '',
     '기본 알림음': 'https://www.soundjay.com/buttons/sounds/beep-07a.mp3',
@@ -20,10 +21,13 @@ BEHAVIORS = [
 ]
 NONE = '행동 없음'
 
+
 def load_logs(log_dir='logs/'):
     logs = []
     for file_name in os.listdir(log_dir):
-        logs.append(pd.read_csv(os.path.join(log_dir, file_name)))
+        df = pd.read_csv(os.path.join(log_dir, file_name))
+        df['캡처'] = df['캡처'].apply(image_to_base64)
+        logs.append(df)
     if not logs:
         logs.append(pd.DataFrame(columns=['날짜', '시간', '행동', '캡처']))
     log = logs.pop()
@@ -48,28 +52,36 @@ if 'log_filter' not in st.session_state:
     st.session_state.log_filter = []
 if 'toasts' not in st.session_state:
     st.session_state.toasts = []
+if 'cam' not in st.session_state:
+    st.session_state.cam = capture_start()
 
 """
 프래그먼트 생성
 """
 @st.fragment(run_every='33ms')
 def image1():
-    st.image(PLACEHOLDERS[st.session_state.placeholder], use_container_width=True)
+    image = capture_frame(st.session_state.cam, image_name='temp')
+    st.image(image or PLACEHOLDER, use_container_width=True)
 
 
 @st.fragment(run_every='33ms')
 def image2():
-    st.image(PLACEHOLDERS[st.session_state.placeholder], use_container_width=True)
+    image = capture_frame(st.session_state.cam, image_name='temp')
+    st.image(image or PLACEHOLDER, use_container_width=True)
 
 
 @st.fragment(run_every='33ms')
 def image3():
-    st.image(PLACEHOLDERS[st.session_state.placeholder], use_container_width=True)
+    image = capture_frame(st.session_state.cam, image_name='temp')
+    st.image(image or PLACEHOLDER, use_container_width=True)
 
 
 @st.fragment(run_every='100ms')
 def dataframe_brief():
-    st.dataframe(st.session_state.log.head(10), use_container_width=True, hide_index=True)
+    st.dataframe(
+        st.session_state.log.head(10), use_container_width=True, hide_index=True,
+        column_config={'캡처': st.column_config.ImageColumn('캡처')}
+    )
 
 
 @st.fragment(run_every='100ms')
@@ -83,7 +95,10 @@ def dataframe_of_day():
             continue
         has_no_data = False
         with st.expander(df.iloc[0]['날짜'], expanded=is_first):
-            st.dataframe(df, use_container_width=True, hide_index=True)
+            st.dataframe(
+                df, use_container_width=True, hide_index=True,
+                column_config={'캡처': st.column_config.ImageColumn('캡처')}
+            )
         is_first = False
     if has_no_data:
         st.caption('행동 기록이 없습니다.')
@@ -99,7 +114,7 @@ st.set_page_config(
 tab_realtime, tab_log, tab_config = st.tabs(['🔴 실시간 영상', '📋 행동 기록', '⚙️ 설정'])
 
 with tab_realtime:
-    col1, col2 = st.columns([25, 10])
+    col1, col2 = st.columns([6, 4])
     with col1:
         image1()
     with col2:
@@ -148,7 +163,7 @@ if st.button('테스트'):
         behavior = BEHAVIORS[randint(0, len(BEHAVIORS) - 1)]
     else:
         behavior = NONE
-    row = get_dataframe_row(now.date(), now.time(), behavior, PLACEHOLDERS[0])
+    row = get_dataframe_row(now.date(), now.time(), behavior, PLACEHOLDER)
     st.session_state.log = pd.concat([row, st.session_state.log], ignore_index=True)
 
     if behavior in st.session_state.noti_filter:

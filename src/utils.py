@@ -14,4 +14,9 @@ def image_to_base64(filepath: str) -> str:
 
 
 def get_dataframe_row(date, time, behavior, image_path):
-    return pd.DataFrame({'날짜': [date.strftime(r'%Y년 %m월 %d일')], '시간': [time.strftime(r'%H시 %M분 %S초')], '행동': [behavior], '캡쳐': [image_path]})
+    return pd.DataFrame({
+        '날짜': [date.strftime(r'%Y년 %m월 %d일')], 
+        '시간': [time.strftime(r'%H시 %M분 %S초')], 
+        '행동': [behavior], 
+        '캡처': [image_to_base64(image_path)]
+    })
