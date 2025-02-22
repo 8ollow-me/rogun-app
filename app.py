@@ -25,6 +25,8 @@ BEHAVIORS = [
 ]
 NONE = '행동 없음'
 
+os.makedirs(FRAME_DIR, exist_ok=True)
+
 
 def load_logs(log_dir='logs/'):
     logs = []
@@ -54,8 +56,8 @@ if 'noti_filter' not in st.session_state:
     st.session_state.noti_filter = []
 if 'log_filter' not in st.session_state:
     st.session_state.log_filter = []
-if 'toasts' not in st.session_state:
-    st.session_state.toasts = []
+if 'log_expanded' not in st.session_state:
+    st.session_state.log_expanded = {}
 
 """
 프래그먼트 생성
@@ -82,18 +84,24 @@ def dataframe_brief():
 def dataframe_of_day():
     has_no_data = True
     is_first = True
-    for df in [st.session_state.log] + st.session_state.logs:
+    logs = [st.session_state.log] + st.session_state.logs
+    for df in logs:
         if st.session_state.log_filter:
             df = df[df['행동'].isin(st.session_state.log_filter)]
         if df.empty:
             continue
         has_no_data = False
-        with st.expander(df.iloc[0]['날짜'], expanded=is_first):
+        
+        date = df.iloc[0]['날짜']
+        if date not in st.session_state.log_expanded:
+            st.session_state.log_expanded[date] = is_first
+        is_first = False
+        
+        with st.expander(date, expanded=st.session_state.log_expanded[date]):
             st.dataframe(
-                df, use_container_width=True, hide_index=True,
+                df, use_container_width=True, hide_index=True, key=date,
                 column_config={'캡처': st.column_config.ImageColumn('캡처')}
             )
-        is_first = False
     if has_no_data:
         st.caption('행동 기록이 없습니다.')
     
@@ -151,15 +159,14 @@ with tab_config:
                 )
 
 
-if st.button('테스트'):
-    now = datetime.now()
-    if st.session_state.behavior == NONE:
-        behavior = BEHAVIORS[randint(0, len(BEHAVIORS) - 1)]
+def add_log(tiemstamp, behavior):
+    row = get_dataframe_row(tiemstamp.date(), tiemstamp.time(), behavior, PLACEHOLDER)
+    if st.session_state.log.empty or st.session_state.log.iloc[0]['날짜'] == row.iloc[0]['날짜']:
+        st.session_state.log = pd.concat([row, st.session_state.log], ignore_index=True)
     else:
-        behavior = NONE
-    row = get_dataframe_row(now.date(), now.time(), behavior, PLACEHOLDER)
-    st.session_state.log = pd.concat([row, st.session_state.log], ignore_index=True)
-
+        st.session_state.logs.insert(0, st.session_state.log)
+        st.session_state.log = row 
+    
     if behavior in st.session_state.noti_filter:
         st.html(
             f'<audio autoplay><source src="{BEEPS[st.session_state.beep]}" type="audio/mpeg"></audio>'
@@ -169,6 +176,14 @@ if st.button('테스트'):
         )
     st.session_state.behavior = behavior
 
+
+if st.button('테스트'):
+    now = datetime.now()
+    if st.session_state.behavior == NONE:
+        behavior = BEHAVIORS[randint(0, len(BEHAVIORS) - 1)]
+    else:
+        behavior = NONE
+    add_log(now, behavior)
 
 """
 작업 스레드
