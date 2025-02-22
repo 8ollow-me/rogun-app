@@ -1,13 +1,17 @@
+from collections import deque
 from datetime import datetime
 from random import randint
 import streamlit as st
 import pandas as pd
-import os
 import cv2 as cv
+import threading
+import time
+import os
 
+from src.img_capture import open_capture, close_capture, capture_frame
 from src.utils import get_dataframe_row, image_to_base64
-from src.img_capture import capture_start, capture_finish, capture_frame
 
+FRAME_DIR = 'frames'
 PLACEHOLDER = 'resources/placeholder.png'
 BEEPS = {
     '알림음 끄기': '',
@@ -52,27 +56,17 @@ if 'log_filter' not in st.session_state:
     st.session_state.log_filter = []
 if 'toasts' not in st.session_state:
     st.session_state.toasts = []
-if 'cam' not in st.session_state:
-    st.session_state.cam = capture_start()
 
 """
 프래그먼트 생성
 """
-@st.fragment(run_every='33ms')
+@st.fragment(run_every='10ms')
 def image1():
-    image = capture_frame(st.session_state.cam, image_name='temp')
-    st.image(image or PLACEHOLDER, use_container_width=True)
-
-
-@st.fragment(run_every='33ms')
-def image2():
-    image = capture_frame(st.session_state.cam, image_name='temp')
-    st.image(image or PLACEHOLDER, use_container_width=True)
-
-
-@st.fragment(run_every='33ms')
-def image3():
-    image = capture_frame(st.session_state.cam, image_name='temp')
+    image = ''
+    if frames := os.listdir(FRAME_DIR):
+        image = os.path.join(FRAME_DIR, frames[-1])
+    if not os.path.exists(image):
+        image = PLACEHOLDER
     st.image(image or PLACEHOLDER, use_container_width=True)
 
 
@@ -123,7 +117,7 @@ with tab_realtime:
 with tab_log:
     col1, col2 = st.columns([1, 4])
     with col1:
-        image2()
+        image1()
     with col2:
         st.markdown('### 행동 기록')
         st.session_state.log_filter = st.multiselect(
@@ -136,7 +130,7 @@ with tab_log:
 with tab_config:
     col1, col2 = st.columns([1, 4])
     with col1:
-        image3()
+        image1()
     with col2:
         st.markdown('### 알림 설정')
         st.session_state.noti_filter = st.multiselect(
@@ -174,3 +168,23 @@ if st.button('테스트'):
            st.toast(f'행동이 감지되었습니다: {behavior}', icon='🐶')
         )
     st.session_state.behavior = behavior
+
+
+"""
+작업 스레드
+"""
+frames = deque(os.listdir(FRAME_DIR))
+
+def take_frame(max_frame, frames):
+    cap = open_capture()
+    while True:
+        frame = capture_frame(cap, FRAME_DIR)
+        frames.append(frame)
+        while len(frames) > max_frame:
+            to_remove = frames.popleft()
+            if os.path.exists(to_remove):
+                os.remove(to_remove)
+        time.sleep(0.030)
+
+
+threading.Thread(target=take_frame, kwargs={'max_frame': 1000, 'frames': frames}, daemon=True).start()

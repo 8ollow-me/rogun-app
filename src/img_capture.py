@@ -3,11 +3,11 @@ import os
 from datetime import datetime
 
 
-def capture_start():
+def open_capture():
     return cv.VideoCapture(0, cv.CAP_DSHOW)
 
 
-def capture_finish(cap):
+def close_capture(cap):
     return cap.release()
 
 
@@ -18,7 +18,7 @@ def capture_frame(cap, target_dir='frames', image_name=None):
         return
 
     if image_name is None:
-        image_name = datetime.now().strftime(r"%Y년 %m월 %d일 %H시 %M분 %S초 %f")
+        image_name = datetime.now().strftime(r"%Y-%m-%d %H_%M_%S_%f")
     file_name = os.path.join(target_dir, f'{image_name}.jpg')
-    cv.imwrite(file_name, frame)
-    return file_name
+    if cv.imwrite(file_name, frame):
+        return file_name
