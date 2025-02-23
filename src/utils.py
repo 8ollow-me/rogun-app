@@ -10,10 +10,10 @@ def image_to_base64(filepath: str, format='png') -> str:
         return f"data:image/{format};base64,{b64_data}"
 
 
-def get_dataframe_row(date, time, behavior, image_path):
+def get_dataframe_row(date, time, behavior, image):
     return pd.DataFrame({
         '날짜': [date.strftime(r'%Y년 %m월 %d일')], 
         '시간': [time.strftime(r'%H시 %M분 %S초')], 
         '행동': [behavior], 
-        '캡처': [image_to_base64(image_path, format='gif')]
+        '캡처': [image_to_base64(image, 'png' if image.endswith('png') else 'gif')]
     })

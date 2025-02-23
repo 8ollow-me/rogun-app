@@ -12,6 +12,7 @@ from src.img_capture import open_capture, close_capture, capture_frame
 from src.utils import get_dataframe_row, image_to_base64
 
 FRAME_DIR = 'frames'
+CAPTURE_DIR = 'captures'
 PLACEHOLDER = 'resources/placeholder.png'
 BEEPS = {
     '알림음 끄기': '',
@@ -26,6 +27,13 @@ BEHAVIORS = [
 NONE = '행동 없음'
 
 os.makedirs(FRAME_DIR, exist_ok=True)
+os.makedirs(CAPTURE_DIR, exist_ok=True)
+
+frames = os.listdir(FRAME_DIR)
+for i in range(len(frames)):
+    frame = frames[i]
+    timestamp = datetime.strptime(frame[:-4], r'%Y-%m-%d %H_%M_%S_%f')
+    frames[i] = (os.path.join(FRAME_DIR, frame), timestamp)
 
 
 def load_logs(log_dir='logs/'):
@@ -39,6 +47,22 @@ def load_logs(log_dir='logs/'):
     log = logs.pop()
     logs.reverse()
     return log, logs
+
+
+def add_log(tiemstamp, behavior, image_path, notify=True):
+    row = get_dataframe_row(tiemstamp.date(), tiemstamp.time(), behavior, image_path)
+    if st.session_state.log.empty or st.session_state.log.iloc[0]['날짜'] == row.iloc[0]['날짜']:
+        st.session_state.log = pd.concat([row, st.session_state.log], ignore_index=True)
+    else:
+        st.session_state.logs.insert(0, st.session_state.log)
+        st.session_state.log = row 
+    
+    if notify and behavior in st.session_state.noti_filter:
+        st.html(
+            f'<audio autoplay><source src="{BEEPS[st.session_state.beep]}" type="audio/mpeg"></audio>'
+        )
+        st.toast(f'행동이 감지되었습니다: {behavior}', icon='🐶')
+    st.session_state.behavior = behavior
 
 
 """
@@ -58,18 +82,32 @@ if 'log_filter' not in st.session_state:
     st.session_state.log_filter = []
 if 'log_expanded' not in st.session_state:
     st.session_state.log_expanded = {}
+if 'is_mic_on' not in st.session_state:
+    st.session_state.is_mic_on = False
+if 'is_cam_on' not in st.session_state:
+    st.session_state.is_cam_on = True
+if 'is_demo' not in st.session_state:
+    st.session_state.is_demo = True
 
 """
 프래그먼트 생성
 """
 @st.fragment(run_every='10ms')
-def image1():
-    image = ''
-    if frames := os.listdir(FRAME_DIR):
-        image = os.path.join(FRAME_DIR, frames[-1])
-    if not os.path.exists(image):
+def realtime_image():
+    if st.session_state.is_demo:
+        if st.session_state.is_cam_on:
+            image = PLACEHOLDER
+        else:
+            image = PLACEHOLDER
+    elif st.session_state.is_cam_on:
+        image = ''
+        if frames := os.listdir(FRAME_DIR):
+            image = os.path.join(FRAME_DIR, frames[-1])
+        if not os.path.exists(image):
+            image = PLACEHOLDER
+    else:
         image = PLACEHOLDER
-    st.image(image or PLACEHOLDER, use_container_width=True)
+    st.image(image, use_container_width=True)
 
 
 @st.fragment(run_every='100ms')
@@ -81,35 +119,69 @@ def dataframe_brief():
 
 
 @st.fragment(run_every='100ms')
-def dataframe_of_day():
+def entire_dataframes():
     has_no_data = True
     is_first = True
     logs = [st.session_state.log] + st.session_state.logs
-    for df in logs:
-        if st.session_state.log_filter:
-            df = df[df['행동'].isin(st.session_state.log_filter)]
-        if df.empty:
-            continue
-        has_no_data = False
-        
-        date = df.iloc[0]['날짜']
-        if date not in st.session_state.log_expanded:
-            st.session_state.log_expanded[date] = is_first
-        is_first = False
-        
-        with st.expander(date, expanded=st.session_state.log_expanded[date]):
-            st.dataframe(
-                df, use_container_width=True, hide_index=True, key=date,
-                column_config={
-                    '날짜': st.column_config.Column(width='small'),
-                    '시간': st.column_config.Column(width='small'),
-                    '행동': st.column_config.Column(width='small'),
-                    '캡처': st.column_config.ImageColumn('캡처', width='large')
-                }
-            )
-    if has_no_data:
-        st.caption('행동 기록이 없습니다.')
-    
+    with st.container():
+        for df in logs:
+            if st.session_state.log_filter:
+                df = df[df['행동'].isin(st.session_state.log_filter)]
+            if df.empty:
+                continue
+            has_no_data = False
+            
+            date = df.iloc[0]['날짜']
+            if date not in st.session_state.log_expanded:
+                st.session_state.log_expanded[date] = is_first
+            is_first = False
+            
+            with st.expander(date, expanded=st.session_state.log_expanded[date]):
+                st.dataframe(
+                    df, use_container_width=True, hide_index=True, key=date,
+                    column_config={
+                        '날짜': st.column_config.Column(width='small'),
+                        '시간': st.column_config.Column(width='small'),
+                        '행동': st.column_config.Column(width='small'),
+                        '캡처': st.column_config.ImageColumn('캡처', width='large')
+                    }
+                )
+        if has_no_data:
+            st.caption('행동 기록이 없습니다.')
+
+
+@st.fragment()
+def toolbar():
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        st.session_state.is_mic_on = st.toggle(
+            '🎙️ 마이크', 
+            value=False, 
+            help='실시간으로 전달된 음성이 홈캠의 스피커에서 재생됩니다.'
+        )
+    with col2:
+        st.session_state.is_cam_on = st.toggle(
+            '📹 캠 표시', 
+            value=True, 
+            help='화면에서 실시간 카메라 화면이 가려지지만, 녹화와 분석은 계속 진행됩니다.'
+        )
+    with col3:
+        if st.button('캡쳐하기', icon='📸', use_container_width=True):
+            image, timestamp = frames[-1]
+            add_log(timestamp, st.session_state.behavior, image, notify=False)
+            st.toast('캡쳐된 이미지가 저장되었습니다.', icon='📸')
+    with col4:
+        if st.button('저장소 열기', icon='📂', use_container_width=True):
+            os.startfile(CAPTURE_DIR, 'open')
+
+
+@st.fragment(run_every='100ms')
+def mic_info():
+    if st.session_state.is_mic_on:
+        st.info('마이크가 켜져있습니다!', icon='🎙️')
+    else:
+        st.empty()
+
 
 """
 뷰 배치
@@ -123,14 +195,17 @@ tab_realtime, tab_log, tab_config = st.tabs(['🔴 실시간 영상', '📋 행�
 with tab_realtime:
     col1, col2 = st.columns([6, 4])
     with col1:
-        image1()
+        realtime_image()
+        toolbar()
     with col2:
         dataframe_brief()
+    mic_info()
     
 with tab_log:
+    mic_info()
     col1, col2 = st.columns([1, 4])
     with col1:
-        image1()
+        realtime_image()
     with col2:
         st.markdown('### 행동 기록')
         st.session_state.log_filter = st.multiselect(
@@ -138,12 +213,12 @@ with tab_log:
             options=[NONE] + BEHAVIORS,
             placeholder='검색 조건을 추가하세요.'
         )
-        dataframe_of_day()
+        entire_dataframes()
 
 with tab_config:
     col1, col2 = st.columns([1, 4])
     with col1:
-        image1()
+        realtime_image()
     with col2:
         st.markdown('### 알림 설정')
         st.session_state.noti_filter = st.multiselect(
@@ -162,38 +237,18 @@ with tab_config:
                 st.html(
                     f'<audio autoplay><source src="{BEEPS[st.session_state.beep]}" type="audio/mpeg"></audio>'
                 )
+        st.markdown('### 접근성 설정')
+        st.session_state.is_demo = st.toggle('시연 모드', True)
+        if st.session_state.is_demo:
+            st.rerun()
 
-
-def add_log(tiemstamp, behavior):
-    row = get_dataframe_row(tiemstamp.date(), tiemstamp.time(), behavior, PLACEHOLDER)
-    if st.session_state.log.empty or st.session_state.log.iloc[0]['날짜'] == row.iloc[0]['날짜']:
-        st.session_state.log = pd.concat([row, st.session_state.log], ignore_index=True)
-    else:
-        st.session_state.logs.insert(0, st.session_state.log)
-        st.session_state.log = row 
-    
-    if behavior in st.session_state.noti_filter:
-        st.html(
-            f'<audio autoplay><source src="{BEEPS[st.session_state.beep]}" type="audio/mpeg"></audio>'
-        )
-        st.toast(f'행동이 감지되었습니다: {behavior}', icon='🐶')
-    st.session_state.behavior = behavior
-
-
-if st.button('테스트'):
-    now = datetime.now()
-    if st.session_state.behavior == NONE:
-        behavior = BEHAVIORS[randint(0, len(BEHAVIORS) - 1)]
-    else:
-        behavior = NONE
-    add_log(now, behavior)
 
 """
 작업 스레드
 """
-frames = deque(os.listdir(FRAME_DIR))
-
-def take_frame(max_frame, frames):
+def take_frame(max_frame):
+    global frames
+    
     cap = open_capture()
     while True:
         frame, timestamp = capture_frame(cap, FRAME_DIR)
@@ -205,4 +260,4 @@ def take_frame(max_frame, frames):
         time.sleep(0.030)
 
 
-threading.Thread(target=take_frame, kwargs={'max_frame': 1000, 'frames': frames}, daemon=True).start()
+threading.Thread(target=take_frame, kwargs={'max_frame': 1000}, daemon=True).start()
