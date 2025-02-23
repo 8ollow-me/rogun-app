@@ -32,7 +32,7 @@ def load_logs(log_dir='logs/'):
     logs = []
     for file_name in os.listdir(log_dir):
         df = pd.read_csv(os.path.join(log_dir, file_name))
-        df['캡처'] = df['캡처'].apply(image_to_base64)
+        df['캡처'] = df['캡처'].apply(image_to_base64, format='gif')
         logs.append(df)
     if not logs:
         logs.append(pd.DataFrame(columns=['날짜', '시간', '행동', '캡처']))
@@ -100,7 +100,12 @@ def dataframe_of_day():
         with st.expander(date, expanded=st.session_state.log_expanded[date]):
             st.dataframe(
                 df, use_container_width=True, hide_index=True, key=date,
-                column_config={'캡처': st.column_config.ImageColumn('캡처')}
+                column_config={
+                    '날짜': st.column_config.Column(width='small'),
+                    '시간': st.column_config.Column(width='small'),
+                    '행동': st.column_config.Column(width='small'),
+                    '캡처': st.column_config.ImageColumn('캡처', width='large')
+                }
             )
     if has_no_data:
         st.caption('행동 기록이 없습니다.')
@@ -171,7 +176,7 @@ def add_log(tiemstamp, behavior):
         st.html(
             f'<audio autoplay><source src="{BEEPS[st.session_state.beep]}" type="audio/mpeg"></audio>'
         )
-           st.toast(f'행동이 감지되었습니다: {behavior}', icon='🐶')
+        st.toast(f'행동이 감지되었습니다: {behavior}', icon='🐶')
     st.session_state.behavior = behavior
 
 
