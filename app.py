@@ -171,9 +171,7 @@ def add_log(tiemstamp, behavior):
         st.html(
             f'<audio autoplay><source src="{BEEPS[st.session_state.beep]}" type="audio/mpeg"></audio>'
         )
-        st.session_state.toasts.append(
            st.toast(f'행동이 감지되었습니다: {behavior}', icon='🐶')
-        )
     st.session_state.behavior = behavior
 
 
@@ -193,10 +191,10 @@ frames = deque(os.listdir(FRAME_DIR))
 def take_frame(max_frame, frames):
     cap = open_capture()
     while True:
-        frame = capture_frame(cap, FRAME_DIR)
-        frames.append(frame)
+        frame, timestamp = capture_frame(cap, FRAME_DIR)
+        frames.append((frame, timestamp))
         while len(frames) > max_frame:
-            to_remove = frames.popleft()
+            to_remove = frames.popleft()[0]
             if os.path.exists(to_remove):
                 os.remove(to_remove)
         time.sleep(0.030)
