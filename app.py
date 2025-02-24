@@ -19,11 +19,7 @@ BEEPS = {
     '기본 알림음': 'https://www.soundjay.com/buttons/sounds/beep-07a.mp3',
     '멍멍': 'https://t1.daumcdn.net/cfile/tistory/99CC98395CE6F54B0A'
 }
-BEHAVIORS = [
-    "BODYLOWER", "BODYSCRATCH", "BODYSHAKE", "FEETUP", "FOOTUP",
-    "HEADING", "LYING", "MOUNTING", "SIT", "TAILING",
-    "TAILLOW", "TURN", "WALKRUN"
-]
+BEHAVIORS = ['FEETUP', 'SIT', 'WALK', 'LYING', 'BODYSHAKE']
 NONE = '행동 없음'
 
 os.makedirs(FRAME_DIR, exist_ok=True)
@@ -34,6 +30,7 @@ for i in range(len(frames)):
     frame = frames[i]
     timestamp = datetime.strptime(frame[:-4], r'%Y-%m-%d %H_%M_%S_%f')
     frames[i] = (os.path.join(FRAME_DIR, frame), timestamp)
+frames = deque(frames)
 
 
 def load_logs(log_dir='logs/'):
@@ -92,7 +89,7 @@ if 'is_demo' not in st.session_state:
 """
 프래그먼트 생성
 """
-@st.fragment(run_every='10ms')
+@st.fragment(run_every='1ms')
 def realtime_image():
     if st.session_state.is_demo:
         if st.session_state.is_cam_on:
@@ -239,25 +236,37 @@ with tab_config:
                 )
         st.markdown('### 접근성 설정')
         st.session_state.is_demo = st.toggle('시연 모드', True)
-        if st.session_state.is_demo:
-            st.rerun()
 
 
 """
 작업 스레드
 """
-def take_frame(max_frame):
+def take_frame():
     global frames
     
     cap = open_capture()
     while True:
         frame, timestamp = capture_frame(cap, FRAME_DIR)
+        if frame is None:
+            continue
         frames.append((frame, timestamp))
+        time.sleep(0.033)
+
+
+def remove_old_frame(max_frame):
+    global frames
+    
+    while True:
         while len(frames) > max_frame:
-            to_remove = frames.popleft()[0]
+            to_remove, _ = frames[0]
             if os.path.exists(to_remove):
-                os.remove(to_remove)
-        time.sleep(0.030)
+                try:
+                    os.remove(to_remove)
+                except Exception as e:
+                    print(e)
+                    continue
+            frames.popleft()
+        time.sleep(0.033)
 
-
-threading.Thread(target=take_frame, kwargs={'max_frame': 1000}, daemon=True).start()
+threading.Thread(target=take_frame, daemon=True).start()
+threading.Thread(target=remove_old_frame, args=(1000,), daemon=True).start()
