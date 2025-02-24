@@ -10,12 +10,15 @@ import time
 import os
 
 from src.img_capture import open_capture, close_capture, capture_frame
+from src.analysis import analyse_daily_activity, analyse_total_activity
 from src.utils import get_dataframe_row, image_to_base64
 
 LOG_DIR = 'logs'
 FRAME_DIR = 'frames'
 CAPTURE_DIR = 'captures'
 PLACEHOLDER = 'resources/placeholder.png'
+CAM_BLIND = 'resources/cam_blind.png'
+
 BEEPS = {
     '알림음 끄기': '',
     '기본 알림음': 'https://www.soundjay.com/buttons/sounds/beep-07a.mp3',
@@ -89,24 +92,25 @@ if 'is_cam_on' not in st.session_state:
 if 'is_demo' not in st.session_state:
     st.session_state.is_demo = True
 
+
+@st.cache_data(ttl='1s')
+def get_analysis():
+    return analyse_total_activity([st.session_state.log] + st.session_state.logs)
+
+
 """
 프래그먼트 생성
 """
 @st.fragment(run_every='1ms')
 def realtime_image():
-    if st.session_state.is_demo:
-        if st.session_state.is_cam_on:
-            image = PLACEHOLDER
-        else:
-            image = PLACEHOLDER
-    elif st.session_state.is_cam_on:
+    if st.session_state.is_cam_on:
         image = ''
         if frames := os.listdir(FRAME_DIR):
             image = os.path.join(FRAME_DIR, frames[-1])
         if not os.path.exists(image):
-            image = PLACEHOLDER
+            image = CAM_BLIND
     else:
-        image = PLACEHOLDER
+        image = CAM_BLIND
     st.image(image, use_container_width=True)
 
 
@@ -187,6 +191,27 @@ def mic_info():
         st.empty()
 
 
+@st.fragment(run_every='5s')
+def analysis():
+    df = analyse_total_activity([st.session_state.log] + st.session_state.logs)
+    cur = df.iloc[len(df) - 1]
+    
+    if -5.0 <= cur['활동량 변화'] <= 5.0:
+        delta_str = '전날과 비교했을 때 활동량에 큰 변화가 없습니다.'
+    elif cur['활동량 변화'] > 5.0:
+        delta_str = '전날에 비해 활동량이 증가했습니다.'
+    else:
+        delta_str = '전날에 비해 활동량이 감소했습니다.'
+    
+    st.metric(
+        cur['날짜'], 
+        value=f'{cur['활동량']:.1f} %', 
+        delta=f'{cur['활동량 변화']:.1f} %', 
+    )
+    st.caption(delta_str)
+    st.line_chart(df, x='날짜', y='활동량', x_label='', y_label='', height=300)
+
+
 """
 뷰 배치
 """
@@ -194,7 +219,7 @@ st.set_page_config(
     page_title='로건 - 반려견 행동 분석',
     layout='wide'
 )
-tab_realtime, tab_log, tag_stat, tab_config = st.tabs(['🔴 실시간 영상', '📋 전체 행동 기록', '📊 통계',  '⚙️ 설정'])
+tab_realtime, tab_log, tab_config = st.tabs(['🔴 실시간 영상', '📋 전체 행동 기록', '⚙️ 설정'])
 
 with tab_realtime:
     col1, col2 = st.columns([6, 4])
@@ -211,6 +236,8 @@ with tab_log:
     col1, col2 = st.columns([1, 4])
     with col1:
         realtime_image()
+        st.markdown('##### 활동량 변화')
+        analysis()
     with col2:
         st.markdown('### 행동 기록')
         st.session_state.log_filter = st.multiselect(
