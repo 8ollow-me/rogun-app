@@ -303,5 +303,6 @@ def remove_old_frame(max_frame):
             frames.popleft()
         time.sleep(0.033)
 
+
 threading.Thread(target=take_frame, daemon=True).start()
 threading.Thread(target=remove_old_frame, args=(1000,), daemon=True).start()
