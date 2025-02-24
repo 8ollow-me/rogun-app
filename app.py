@@ -5,6 +5,7 @@ import streamlit as st
 import pandas as pd
 import cv2 as cv
 import threading
+import shutil
 import time
 import os
 
@@ -161,14 +162,15 @@ def toolbar():
         )
     with col2:
         st.session_state.is_cam_on = st.toggle(
-            '📹 캠 표시', 
+            '📹 카메라', 
             value=True, 
             help='화면에서 실시간 카메라 화면이 가려지지만, 녹화와 분석은 계속 진행됩니다.'
         )
     with col3:
-        if st.button('캡쳐하기', icon='📸', use_container_width=True):
+        if st.button('캡쳐하기', icon='📸', use_container_width=True) and frames:
             image, timestamp = frames[-1]
             add_log(timestamp, st.session_state.behavior, image, notify=False)
+            shutil.copy(image, CAPTURE_DIR)
             st.toast('캡쳐된 이미지가 저장되었습니다.', icon='📸')
     with col4:
         if st.button('저장소 열기', icon='📂', use_container_width=True):
