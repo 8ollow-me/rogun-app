@@ -12,6 +12,7 @@ import os
 from src.img_capture import open_capture, close_capture, capture_frame
 from src.utils import get_dataframe_row, image_to_base64
 
+LOG_DIR = 'logs'
 FRAME_DIR = 'frames'
 CAPTURE_DIR = 'captures'
 PLACEHOLDER = 'resources/placeholder.png'
@@ -38,7 +39,7 @@ def load_logs(log_dir='logs/'):
     logs = []
     for file_name in os.listdir(log_dir):
         df = pd.read_csv(os.path.join(log_dir, file_name))
-        df['캡처'] = df['캡처'].apply(image_to_base64, format='gif')
+        df['캡처'] = df['파일'].apply(lambda f: image_to_base64(f, format=f[-3:]) if os.path.exists(f) else '')
         logs.append(df)
     if not logs:
         logs.append(pd.DataFrame(columns=['날짜', '시간', '행동', '캡처']))
@@ -53,8 +54,9 @@ def add_log(tiemstamp, behavior, image_path, notify=True):
         st.session_state.log = pd.concat([row, st.session_state.log], ignore_index=True)
     else:
         st.session_state.logs.insert(0, st.session_state.log)
-        st.session_state.log = row 
-    
+        st.session_state.log = row
+    if not st.session_state.log.empty:
+        st.session_state.log.drop(columns=['캡처']).to_csv(os.path.join(LOG_DIR, st.session_state.log.iloc[0]['날짜'] + '.csv'), index=False)
     if notify and behavior in st.session_state.noti_filter:
         st.html(
             f'<audio autoplay><source src="{BEEPS[st.session_state.beep]}" type="audio/mpeg"></audio>'
@@ -111,8 +113,11 @@ def realtime_image():
 @st.fragment(run_every='100ms')
 def dataframe_brief():
     st.dataframe(
-        st.session_state.log.head(10), use_container_width=True, hide_index=True,
-        column_config={'캡처': st.column_config.ImageColumn('캡처')}
+        st.session_state.log.drop(columns=['파일']).head(10), 
+        use_container_width=True, hide_index=True,
+        column_config={
+            '캡처': st.column_config.ImageColumn('캡처', width='large')
+        }
     )
 
 
@@ -136,9 +141,9 @@ def entire_dataframes():
             
             with st.expander(date, expanded=st.session_state.log_expanded[date]):
                 st.dataframe(
-                    df, use_container_width=True, hide_index=True, key=date,
+                    df.drop(columns=['파일', '날짜']), 
+                    use_container_width=True, hide_index=True, key=date,
                     column_config={
-                        '날짜': st.column_config.Column(width='small'),
                         '시간': st.column_config.Column(width='small'),
                         '행동': st.column_config.Column(width='small'),
                         '캡처': st.column_config.ImageColumn('캡처', width='large')
@@ -166,8 +171,8 @@ def toolbar():
     with col3:
         if st.button('캡쳐하기', icon='📸', use_container_width=True) and frames:
             image, timestamp = frames[-1]
-            add_log(timestamp, st.session_state.behavior, image, notify=False)
             shutil.copy(image, CAPTURE_DIR)
+            add_log(timestamp, st.session_state.behavior, os.path.join(CAPTURE_DIR, os.path.basename(image)), notify=False)
             st.toast('캡쳐된 이미지가 저장되었습니다.', icon='📸')
     with col4:
         if st.button('저장소 열기', icon='📂', use_container_width=True):
@@ -189,7 +194,7 @@ st.set_page_config(
     page_title='로건 - 반려견 행동 분석',
     layout='wide'
 )
-tab_realtime, tab_log, tab_config = st.tabs(['🔴 실시간 영상', '📋 행동 기록', '⚙️ 설정'])
+tab_realtime, tab_log, tag_stat, tab_config = st.tabs(['🔴 실시간 영상', '📋 전체 행동 기록', '📊 통계',  '⚙️ 설정'])
 
 with tab_realtime:
     col1, col2 = st.columns([6, 4])
@@ -198,6 +203,7 @@ with tab_realtime:
         toolbar()
     with col2:
         dataframe_brief()
+        st.caption('최근에 기록된 행동이 10개까지 표시됩니다.')
     mic_info()
     
 with tab_log:

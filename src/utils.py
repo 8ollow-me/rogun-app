@@ -14,6 +14,7 @@ def get_dataframe_row(date, time, behavior, image):
     return pd.DataFrame({
         '날짜': [date.strftime(r'%Y년 %m월 %d일')], 
         '시간': [time.strftime(r'%H시 %M분 %S초')], 
-        '행동': [behavior], 
+        '행동': [behavior],
+        '파일': [image], 
         '캡처': [image_to_base64(image, 'png' if image.endswith('png') else 'gif')]
     })
