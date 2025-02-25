@@ -1,2 +1,7 @@
 .venv/
 .vscode/
+**/__pycache__/
+frames/
+captures/
+bbox/
+resources/demo.mp4
