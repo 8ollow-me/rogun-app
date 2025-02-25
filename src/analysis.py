@@ -1,6 +1,8 @@
 import pandas as pd
 from datetime import timedelta
 
+NODOG = '강아지 없음'
+
 
 def analyse_daily_activity(df: pd.DataFrame, labels=['LYING', 'SIT', 'WALK', 'FEETUP', 'BODYSHAKE']):
     df = df[df['행동'] != '행동 없음'].copy()
@@ -18,14 +20,12 @@ def analyse_daily_activity(df: pd.DataFrame, labels=['LYING', 'SIT', 'WALK', 'FE
         if behavior in duration_of_behavior:
             t = duration_of_behavior[behavior]
             results['행동'].append(behavior)
-            results['총 지속 시간'].append(
-                f'{t.seconds // 3600}시간 {(t.seconds % 3600 // 60)}분 {t.seconds % 60}초'
-            )
+            results['총 지속 시간'].append(t)
             results['비율'].append(t / total_duration * 100)
         else:
             results['행동'].append(behavior)
             results['총 지속 시간'].append(timedelta(seconds=0))
-            results['비율'].append('0시간 0분 0초')
+            results['비율'].append(0)
     df = pd.DataFrame(results)
     return df.set_index('행동')
 

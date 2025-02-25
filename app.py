@@ -1,23 +1,31 @@
 from collections import deque
 from datetime import datetime
 from random import randint
+from PIL import ImageFile
+
 import streamlit as st
 import pandas as pd
 import cv2 as cv
-import threading
+
 import shutil
-import time
 import os
 
 from src.img_capture import open_capture, close_capture, capture_frame
+from src.inference import infer_image
 from src.analysis import analyse_daily_activity, analyse_total_activity
 from src.utils import get_dataframe_row, image_to_base64
+from src.gif import make_gif
+
+ImageFile.LOAD_TRUNCATED_IMAGES = True
 
 LOG_DIR = 'logs'
 FRAME_DIR = 'frames'
 CAPTURE_DIR = 'captures'
+BBOX_DIR = 'bbox'
+
 PLACEHOLDER = 'resources/placeholder.png'
 CAM_BLIND = 'resources/cam_blind.png'
+SOURCE_VIDEO = 'resources/demo.mp4'
 
 BEEPS = {
     '알림음 끄기': '',
@@ -25,58 +33,36 @@ BEEPS = {
     '멍멍': 'https://t1.daumcdn.net/cfile/tistory/99CC98395CE6F54B0A'
 }
 BEHAVIORS = ['FEETUP', 'SIT', 'WALK', 'LYING', 'BODYSHAKE']
-NONE = '행동 없음'
+NODOG = '강아지 없음'
 
+
+os.makedirs(BBOX_DIR, exist_ok=True)
 os.makedirs(FRAME_DIR, exist_ok=True)
 os.makedirs(CAPTURE_DIR, exist_ok=True)
-
-frames = os.listdir(FRAME_DIR)
-for i in range(len(frames)):
-    frame = frames[i]
-    timestamp = datetime.strptime(frame[:-4], r'%Y-%m-%d %H_%M_%S_%f')
-    frames[i] = (os.path.join(FRAME_DIR, frame), timestamp)
-frames = deque(frames)
 
 
 def load_logs(log_dir='logs/'):
     logs = []
-    for file_name in os.listdir(log_dir):
+    for i, file_name in enumerate(os.listdir(log_dir)):
         df = pd.read_csv(os.path.join(log_dir, file_name))
-        df['캡처'] = df['파일'].apply(lambda f: image_to_base64(f, format=f[-3:]) if os.path.exists(f) else '')
         logs.append(df)
     if not logs:
-        logs.append(pd.DataFrame(columns=['날짜', '시간', '행동', '캡처']))
+        logs.append(pd.DataFrame(columns=['날짜', '시간', '행동']))
     log = logs.pop()
     logs.reverse()
     return log, logs
 
 
-def add_log(tiemstamp, behavior, image_path, notify=True):
-    row = get_dataframe_row(tiemstamp.date(), tiemstamp.time(), behavior, image_path)
-    if st.session_state.log.empty or st.session_state.log.iloc[0]['날짜'] == row.iloc[0]['날짜']:
-        st.session_state.log = pd.concat([row, st.session_state.log], ignore_index=True)
-    else:
-        st.session_state.logs.insert(0, st.session_state.log)
-        st.session_state.log = row
-    if not st.session_state.log.empty:
-        st.session_state.log.drop(columns=['캡처']).to_csv(os.path.join(LOG_DIR, st.session_state.log.iloc[0]['날짜'] + '.csv'), index=False)
-    if notify and behavior in st.session_state.noti_filter:
-        st.html(
-            f'<audio autoplay><source src="{BEEPS[st.session_state.beep]}" type="audio/mpeg"></audio>'
-        )
-        st.toast(f'행동이 감지되었습니다: {behavior}', icon='🐶')
-    st.session_state.behavior = behavior
-
-
 """
 상태 생성
 """
+
 if 'placeholder' not in st.session_state:
     st.session_state.placeholder = 0 
 if 'log' not in st.session_state:
     st.session_state.log, st.session_state.logs = load_logs()
 if 'behavior' not in st.session_state:
-    st.session_state.behavior = NONE
+    st.session_state.behavior = NODOG
 if 'beep' not in st.session_state:
     st.session_state.beep = list(BEEPS.keys())[1]
 if 'noti_filter' not in st.session_state:
@@ -89,26 +75,69 @@ if 'is_mic_on' not in st.session_state:
     st.session_state.is_mic_on = False
 if 'is_cam_on' not in st.session_state:
     st.session_state.is_cam_on = True
+    
+if 'demo_cap' not in st.session_state:
+    st.session_state.demo_cap = open_capture(SOURCE_VIDEO)
+if 'live_cap' not in st.session_state:
+    # st.session_state.live_cap = open_capture(0)
+    st.session_state.live_cap = st.session_state.demo_cap
+
+if 'frames' not in st.session_state:
+    frames = os.listdir(FRAME_DIR)
+    for i in range(len(frames)):
+        frame = frames[i]
+        timestamp = datetime.strptime(frame[:-4], r'%Y-%m-%d %H_%M_%S_%f')
+        frames[i] = (os.path.join(FRAME_DIR, frame), timestamp)
+    frames = deque(frames)
+    st.session_state.frames = frames
+if 'bbox_frames' not in st.session_state:
+    bbox_frames = os.listdir(BBOX_DIR)
+    for i in range(len(bbox_frames)):
+        file_path = bbox_frames[i]
+        file_name = os.path.basename(file_path)
+        if len(file_name[:-4].split(maxsplit=3)) != 4:
+            continue
+        d, t, has_dog, behavior = file_name[:-4].split(maxsplit=3)
+        timestamp = datetime.strptime(f'{d} {t}', r'%Y-%m-%d %H_%M_%S_%f')
+        bbox_frames[i] = (file_path, timestamp, has_dog, behavior)
+    bbox_frames = deque(bbox_frames)
+    st.session_state.bbox_frames = bbox_frames
 if 'is_demo' not in st.session_state:
     st.session_state.is_demo = True
+if 'gif_queue' not in st.session_state:
+    st.session_state.gif_queue = deque()
 
 
-@st.cache_data(ttl='1s')
-def get_analysis():
-    return analyse_total_activity([st.session_state.log] + st.session_state.logs)
+def add_log(tiemstamp, behavior, image_path, notify=True):
+    row = get_dataframe_row(tiemstamp.date(), tiemstamp.time(), behavior, image_path)
+    if st.session_state.log.empty or st.session_state.log.iloc[0]['날짜'] == row.iloc[0]['날짜']:
+        st.session_state.log = pd.concat([row, st.session_state.log], ignore_index=True)
+    else:
+        st.session_state.logs.insert(0, st.session_state.log)
+        st.session_state.log = row
+    if not st.session_state.log.empty:
+        st.session_state.log.to_csv(os.path.join(LOG_DIR, st.session_state.log.iloc[0]['날짜'] + '.csv'), index=False)
+    if notify and behavior in st.session_state.noti_filter:
+        st.html(
+            f'<audio autoplay><source src="{BEEPS[st.session_state.beep]}" type="audio/mpeg"></audio>'
+        )
+        st.toast(f'행동이 감지되었습니다: {behavior}', icon='🐶')
+    st.session_state.behavior = behavior
 
 
 """
 프래그먼트 생성
 """
-@st.fragment(run_every='1ms')
+
+
+@st.fragment(run_every='100ms')
 def realtime_image():
     if st.session_state.is_cam_on:
         image = ''
         if frames := os.listdir(FRAME_DIR):
             image = os.path.join(FRAME_DIR, frames[-1])
         if not os.path.exists(image):
-            image = CAM_BLIND
+            image = PLACEHOLDER
     else:
         image = CAM_BLIND
     st.image(image, use_container_width=True)
@@ -117,10 +146,10 @@ def realtime_image():
 @st.fragment(run_every='100ms')
 def dataframe_brief():
     st.dataframe(
-        st.session_state.log.drop(columns=['파일']).head(10), 
+        st.session_state.log.head(10), 
         use_container_width=True, hide_index=True,
         column_config={
-            '캡처': st.column_config.ImageColumn('캡처', width='large')
+            '파일': st.column_config.LinkColumn(display_text="탐색기에서 열기")
         }
     )
 
@@ -145,12 +174,10 @@ def entire_dataframes():
             
             with st.expander(date, expanded=st.session_state.log_expanded[date]):
                 st.dataframe(
-                    df.drop(columns=['파일', '날짜']), 
+                    df, 
                     use_container_width=True, hide_index=True, key=date,
                     column_config={
-                        '시간': st.column_config.Column(width='small'),
-                        '행동': st.column_config.Column(width='small'),
-                        '캡처': st.column_config.ImageColumn('캡처', width='large')
+                        '파일': st.column_config.LinkColumn(display_text="탐색기에서 열기")
                     }
                 )
         if has_no_data:
@@ -179,8 +206,7 @@ def toolbar():
             add_log(timestamp, st.session_state.behavior, os.path.join(CAPTURE_DIR, os.path.basename(image)), notify=False)
             st.toast('캡쳐된 이미지가 저장되었습니다.', icon='📸')
     with col4:
-        if st.button('저장소 열기', icon='📂', use_container_width=True):
-            os.startfile(CAPTURE_DIR, 'open')
+        st.button('저장소 열기', icon='📂', use_container_width=True)
 
 
 @st.fragment(run_every='100ms')
@@ -215,6 +241,7 @@ def analysis():
 """
 뷰 배치
 """
+
 st.set_page_config(
     page_title='로건 - 반려견 행동 분석',
     layout='wide'
@@ -242,7 +269,7 @@ with tab_log:
         st.markdown('### 행동 기록')
         st.session_state.log_filter = st.multiselect(
             label='검색 필터',
-            options=[NONE] + BEHAVIORS,
+            options=[NODOG] + BEHAVIORS,
             placeholder='검색 조건을 추가하세요.'
         )
         entire_dataframes()
@@ -270,39 +297,104 @@ with tab_config:
                     f'<audio autoplay><source src="{BEEPS[st.session_state.beep]}" type="audio/mpeg"></audio>'
                 )
         st.markdown('### 접근성 설정')
-        st.session_state.is_demo = st.toggle('시연 모드', True)
-
+        st.session_state.is_demo = st.toggle('시연 모드', value=True)
 
 """
-작업 스레드
+작업 코루틴
 """
+
+
+@st.fragment(run_every='100ms')
 def take_frame():
-    global frames
+    frames = st.session_state.frames
+    demo_cap = st.session_state.demo_cap
+    live_cap = st.session_state.live_cap
     
-    cap = open_capture()
-    while True:
-        frame, timestamp = capture_frame(cap, FRAME_DIR)
-        if frame is None:
-            continue
-        frames.append((frame, timestamp))
-        time.sleep(0.033)
+    frame, timestamp = capture_frame(demo_cap if st.session_state.is_demo else live_cap, FRAME_DIR)
+    if frame is None:
+        return
+    frames.append((frame, timestamp))
+take_frame()
 
 
-def remove_old_frame(max_frame):
-    global frames
+@st.fragment(run_every='1s')
+def infer():
+    frames = st.session_state.frames
+    bbox_frames = st.session_state.bbox_frames
+    gif_queue = st.session_state.gif_queue
     
-    while True:
-        while len(frames) > max_frame:
-            to_remove, _ = frames[0]
-            if os.path.exists(to_remove):
-                try:
-                    os.remove(to_remove)
-                except Exception as e:
-                    print(e)
-                    continue
-            frames.popleft()
-        time.sleep(0.033)
+    if bbox_frames and isinstance(bbox_frames[-1], tuple):
+        _, _, has_dog, behavior = bbox_frames[-1]
+    else:
+        has_dog = False
+        behavior = NODOG
+    
+    if not frames:
+        return
+    
+    frame, timestamp = frames[-1]
+    
+    # result = infer_image(frame, has_dog, behavior)
+    result = {'bbox_image_path': '_', 'has_dog': True, 'current_class': 'WALK', 'make_gif': False}
+    print(f'infer: {result}')
+    bbox_image = result['bbox_image_path']
+    has_dog = result['has_dog']
+    behavior = result['current_class']
+    need_gif = result['make_gif']
+    
+    bbox_frames.append((bbox_image, timestamp, has_dog, behavior))
+    
+    if need_gif:
+        gif_name = f'{timestamp.strftime(r'%Y-%m-%d %H_%M_%S_%f')}.gif'
+        gif_queue.append((gif_name, timestamp))
+        add_log(timestamp, behavior, os.path.join(CAPTURE_DIR, gif_name))
+    
+    st.session_state.behavior = behavior
+infer()
 
 
-threading.Thread(target=take_frame, daemon=True).start()
-threading.Thread(target=remove_old_frame, args=(1000,), daemon=True).start()
+@st.fragment(run_every='1s')
+def gif():
+    gif_queue = st.session_state.gif_queue
+    print(f'@@@ gif: {gif_queue}')
+    DURATION = 10
+    
+    if not gif_queue:
+        return
+    
+    gif_name, timestamp = gif_queue[0]
+    while (datetime.now() - timestamp).total_seconds() > DURATION // 2:
+        make_gif(BBOX_DIR, CAPTURE_DIR, gif_name, 10 * DURATION)
+        gif_queue.popleft()
+        if not gif_queue:
+            break
+        gif_name, timestamp = gif_queue[0]
+gif()
+
+
+@st.fragment(run_every='1s')
+def remove_old_frame():
+    print(f'@@@ remove_old_frame')
+    frames = st.session_state.frames
+    bbox_frames = st.session_state.bbox_frames
+    
+    while len(frames) > 1000:
+        to_remove, _ = frames[0]
+        if os.path.exists(to_remove):
+            try:
+                os.remove(to_remove)
+            except Exception as e:
+                print(e)
+                continue
+        frames.popleft()
+
+    while len(bbox_frames) > 1000:
+        to_remove, _, _, _ = bbox_frames[0]
+        if os.path.exists(to_remove):
+            try:
+                os.remove(to_remove)
+            except Exception as e:
+                print(e)
+                continue
+        bbox_frames.popleft()
+remove_old_frame()

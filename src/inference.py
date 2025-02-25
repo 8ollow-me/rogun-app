@@ -1,41 +1,42 @@
+from torchvision import models
+from ultralytics import YOLO
+from PIL import Image
+
+import pandas as pd
+import numpy as np
+import shutil
+import time
+import cv2
+import os
+
 import torch
 import torch.nn as nn
 import torchvision.transforms as transforms
-from torchvision import models
-import cv2
-import numpy as np
-import os
-import time
-import pandas as pd
-from ultralytics import YOLO
-from PIL import Image
+
+torch.classes.__path__ = []
 
 # ------------------------
 # 1. 환경 설정
 # ------------------------
-output_dir = "/Users/vairocana/Downloads/ROGUN"
-bbox_screenshot_dir = os.path.join(output_dir, "bbox_screenshot")
-screenshot_dir = os.path.join(output_dir, "screenshot")
-log_csv_path = os.path.join(output_dir, "log.csv")
-
-os.makedirs(output_dir, exist_ok=True)
-os.makedirs(bbox_screenshot_dir, exist_ok=True)
-os.makedirs(screenshot_dir, exist_ok=True)
+NODOG = '강아지 없음'
+BBOX_DIR = 'bbox'
+os.makedirs(BBOX_DIR, exist_ok=True)
 
 # ------------------------
 # 2. YOLO 모델 로드 (강아지 탐지)
 # ------------------------
-yolo_model = YOLO("/Users/vairocana/Downloads/yolo11m.pt")
+yolo_model = YOLO("resources/yolo11m.pt")
 
 # ------------------------
 # 3. ResNet 모델 로드 (강아지 동작 분류)
 # ------------------------
+device = 'cuda' if torch.cuda.is_available() else 'cpu'
 resnet_model = models.resnet18(weights=None)
 num_features = resnet_model.fc.in_features
 num_classes = 10
 resnet_model.fc = nn.Linear(num_features, num_classes)
-resnet_model.load_state_dict(torch.load("/Users/vairocana/Desktop/AI/resnet_models/resnet18_model_82.pth", map_location="cpu"))
-resnet_model.to("cpu")
+resnet_model.load_state_dict(torch.load("resources/resnet18.pth", map_location=device))
+resnet_model.to(device)
 resnet_model.eval()
 
 # ------------------------
@@ -97,10 +98,16 @@ def infer_image(image_path, prev_has_dog, prev_class):
     Returns:
         dict: 결과 정보 (바운딩 박스 이미지 경로, 강아지 존재 여부, 현재 동작, GIF 생성 여부)
     """
+    global yolo_model
+    
     frame = cv2.imread(image_path)
     if frame is None:
         print(f"❌ 이미지 로드 실패: {image_path}")
-        return None
+        return {"has_dog": prev_has_dog, "current_class": prev_class, "make_gif": False}
+    
+    # 우선 목적지에 원본 이미지를 복제
+    shutil.copy(image_path, BBOX_DIR)
+    image_path = os.path.join(BBOX_DIR, os.path.basename(image_path))
     
     frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
@@ -118,9 +125,13 @@ def infer_image(image_path, prev_has_dog, prev_class):
 
     # 2️⃣ 강아지가 없는 경우 처리
     if best_box is None:
-        if not prev_has_dog:
-            return None
-        return {"bbox_img_path": image_path, "has_dog": False, "current_class": "NODOG", "make_gif": False}
+        print('👁️‍🗨️ 강아지가 없습니다.')
+        new_image_path = f'{image_path[:-4]} False 강아지 없음.jpg'
+        if not os.path.exists(new_image_path):
+            os.rename(image_path, new_image_path)
+        else:
+            os.remove(image_path)
+        return {"bbox_image_path": image_path, "has_dog": False, "current_class": NODOG, "make_gif": prev_has_dog}
 
     # 3️⃣ 강아지 영역 크롭 후 ResNet으로 분류
     x1, y1, x2, y2 = best_box
@@ -129,25 +140,28 @@ def infer_image(image_path, prev_has_dog, prev_class):
     processed_img = transform(cropped_img_pil).unsqueeze(0)
 
     with torch.no_grad():
-        outputs = resnet_model(processed_img)
+        start_time = time.time()
+        outputs = resnet_model(processed_img.to(device))
+        end_time = time.time()
         probs = torch.softmax(outputs, dim=1)
         predicted_class = torch.argmax(probs, dim=1).item()
         confidence = probs[0, predicted_class].item()
 
     current_class = ["BODYLOWER", "BODYSCRATCH", "BODYSHAKE", "FEETUP", "FOOTUP", "LYING", "MOUNTING", "SIT", "TURN", "WALKRUN"][predicted_class]
 
+    # 추론 시간 계산 (ms 단위)
+    inference_time_ms = (end_time - start_time) * 1000
+    print(f"Speed: {inference_time_ms:.2f}ms for ResNet")
+
     # 4️⃣ 바운딩 박스 그리기 (현재 클래스 적용)
-    bbox_screenshot_path = os.path.join(bbox_screenshot_dir, os.path.basename(image_path))
     frame = draw_bounding_box(frame, x1, y1, x2, y2, current_class)
-    cv2.imwrite(bbox_screenshot_path, frame)
+    cv2.imwrite(image_path, frame)
 
     # 5️⃣ 이전 클래스와 비교하여 GIF 생성 여부 결정
-    make_gif = prev_class != current_class if prev_class != "NODOG" else False
-
-    return {"bbox_img_path": bbox_screenshot_path, "has_dog": True, "current_class": current_class, "make_gif": make_gif}
-
-
-
-image_path = "/Users/vairocana/Downloads/sample2.jpg" # 테스트 해 볼 이미지 경로
-result = infer_image(image_path, prev_has_dog=False, prev_class="NODOG")
-print(result)
+    print(f'👁️‍🗨️ 추론 결과: {current_class}')
+    new_image_path = f'{image_path[:-4]} True {current_class}.jpg'
+    if not os.path.exists(new_image_path):
+        os.rename(image_path, new_image_path)
+    else:
+        os.remove(image_path)
+    return {"bbox_image_path": image_path, "has_dog": True, "current_class": current_class, "make_gif": prev_class != current_class}

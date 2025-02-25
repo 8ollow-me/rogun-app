@@ -3,3 +3,7 @@ pillow
 opencv-python
 pandas
 imageio
+ultralytics
+
+torch
+torch-vision
