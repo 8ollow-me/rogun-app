@@ -140,7 +140,7 @@ def realtime_image():
             image = PLACEHOLDER
     else:
         image = CAM_BLIND
-    st.image(image, use_container_width=True)
+    st.image(image, use_container_width=True, width=800)
 
 
 @st.fragment(run_every='100ms')
