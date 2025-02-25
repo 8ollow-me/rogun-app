@@ -249,13 +249,13 @@ st.set_page_config(
 tab_realtime, tab_log, tab_config = st.tabs(['🔴 실시간 영상', '📋 전체 행동 기록', '⚙️ 설정'])
 
 with tab_realtime:
-    col1, col2 = st.columns([6, 4])
-    with col1:
-        realtime_image()
-        toolbar()
-    with col2:
-        dataframe_brief()
-        st.caption('최근에 기록된 행동이 10개까지 표시됩니다.')
+    # col1, col2 = st.columns([6, 4])
+    # with col1:
+    toolbar()
+    realtime_image()
+    # with col2:
+    #     dataframe_brief()
+    #     st.caption('최근에 기록된 행동이 10개까지 표시됩니다.')
     mic_info()
     
 with tab_log:
