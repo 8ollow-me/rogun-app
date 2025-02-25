@@ -1,2 +1,9 @@
 streamlit
-PILLOW
+pillow
+opencv-python
+pandas
+imageio
+ultralytics
+
+torch
+torch-vision
