@@ -5,7 +5,7 @@ NODOG = '강아지 없음'
 
 
 def analyse_daily_activity(df: pd.DataFrame, labels=['LYING', 'SIT', 'WALK', 'FEETUP', 'BODYSHAKE']):
-    df = df[df['행동'] != '행동 없음'].copy()
+    df = df[df['행동'] != NODOG].copy()
     
     df['날짜-시간'] = pd.to_datetime(df['날짜'] + ' ' + df['시간'], format=r'%Y년 %m월 %d일 %H시 %M분 %S초 %f')
     df = df.sort_values(by='날짜-시간')

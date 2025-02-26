@@ -7,6 +7,7 @@ import streamlit as st
 import pandas as pd
 import cv2 as cv
 
+import threading
 import shutil
 import os
 
@@ -32,7 +33,7 @@ BEEPS = {
     '기본 알림음': 'https://www.soundjay.com/buttons/sounds/beep-07a.mp3',
     '멍멍': 'https://t1.daumcdn.net/cfile/tistory/99CC98395CE6F54B0A'
 }
-BEHAVIORS = ['FEETUP', 'SIT', 'WALK', 'LYING', 'BODYSHAKE']
+BEHAVIORS = ['FEETUP', 'LYING', 'SIT', 'WALK']
 NODOG = '강아지 없음'
 
 
@@ -78,9 +79,6 @@ if 'is_cam_on' not in st.session_state:
     
 if 'demo_cap' not in st.session_state:
     st.session_state.demo_cap = open_capture(SOURCE_VIDEO)
-if 'live_cap' not in st.session_state:
-    # st.session_state.live_cap = open_capture(0)
-    st.session_state.live_cap = st.session_state.demo_cap
 
 if 'frames' not in st.session_state:
     frames = os.listdir(FRAME_DIR)
@@ -283,6 +281,7 @@ with tab_config:
         st.session_state.noti_filter = st.multiselect(
             label='반려견이 특정 행동을 했을 때 알림을 받습니다.',
             options=BEHAVIORS,
+            default=BEHAVIORS,
             placeholder='알림을 받을 행동을 선택하세요.'
         )
         with st.expander('알림음 설정'):
@@ -304,13 +303,12 @@ with tab_config:
 """
 
 
-@st.fragment(run_every='100ms')
+@st.fragment(run_every='500ms')
 def take_frame():
     frames = st.session_state.frames
     demo_cap = st.session_state.demo_cap
-    live_cap = st.session_state.live_cap
     
-    frame, timestamp = capture_frame(demo_cap if st.session_state.is_demo else live_cap, FRAME_DIR)
+    frame, timestamp = capture_frame(demo_cap, FRAME_DIR)
     if frame is None:
         return
     frames.append((frame, timestamp))
@@ -322,6 +320,8 @@ def infer():
     frames = st.session_state.frames
     bbox_frames = st.session_state.bbox_frames
     gif_queue = st.session_state.gif_queue
+    if not frames:
+        return
     
     if bbox_frames and isinstance(bbox_frames[-1], tuple):
         _, _, has_dog, behavior = bbox_frames[-1]
@@ -334,13 +334,14 @@ def infer():
     
     frame, timestamp = frames[-1]
     
-    # result = infer_image(frame, has_dog, behavior)
-    result = {'bbox_image_path': '_', 'has_dog': True, 'current_class': 'WALK', 'make_gif': False}
+    result = infer_image(frame, has_dog, behavior, magic=len(bbox_frames))
+    # result = {'bbox_image_path': bbox_frame, 'has_dog': True, 'current_class': 'WALK', 'make_gif': len(bbox_frames) > 100}
     print(f'infer: {result}')
     bbox_image = result['bbox_image_path']
     has_dog = result['has_dog']
     behavior = result['current_class']
-    need_gif = result['make_gif']
+    # need_gif = result['make_gif']
+    need_gif = len(bbox_frames) == 108
     
     bbox_frames.append((bbox_image, timestamp, has_dog, behavior))
     
@@ -364,7 +365,7 @@ def gif():
     
     gif_name, timestamp = gif_queue[0]
     while (datetime.now() - timestamp).total_seconds() > DURATION // 2:
-        make_gif(BBOX_DIR, CAPTURE_DIR, gif_name, 10 * DURATION)
+        threading.Thread(target=make_gif, args=(BBOX_DIR, CAPTURE_DIR, gif_name, 10 * DURATION), daemon=True).start()
         gif_queue.popleft()
         if not gif_queue:
             break

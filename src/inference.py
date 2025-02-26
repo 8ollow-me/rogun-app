@@ -21,6 +21,7 @@ torch.classes.__path__ = []
 NODOG = '강아지 없음'
 BBOX_DIR = 'bbox'
 os.makedirs(BBOX_DIR, exist_ok=True)
+BEHAVIORS = ['FEETUP', 'LYING', 'SIT', 'WALK']
 
 # ------------------------
 # 2. YOLO 모델 로드 (강아지 탐지)
@@ -31,11 +32,11 @@ yolo_model = YOLO("resources/yolo11m.pt")
 # 3. ResNet 모델 로드 (강아지 동작 분류)
 # ------------------------
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
-resnet_model = models.resnet18(weights=None)
+resnet_model = models.resnet34(weights=None)
 num_features = resnet_model.fc.in_features
-num_classes = 10
+num_classes = 4
 resnet_model.fc = nn.Linear(num_features, num_classes)
-resnet_model.load_state_dict(torch.load("resources/resnet18.pth", map_location=device))
+resnet_model.load_state_dict(torch.load("resources/ResNet-34_96_1m17s_2537_8_10_2e-04_1e-06.pth", map_location=device))
 resnet_model.to(device)
 resnet_model.eval()
 
@@ -91,7 +92,7 @@ def draw_bounding_box(frame, x1, y1, x2, y2, class_name):
 # ------------------------
 # 6. 이미지 추론 함수 (YOLO + ResNet)
 # ------------------------
-def infer_image(image_path, prev_has_dog, prev_class):
+def infer_image(image_path, prev_has_dog, prev_class, magic=-1):
     """
     입력 이미지에서 강아지를 감지하고 동작을 분류하는 함수.
 
@@ -147,7 +148,16 @@ def infer_image(image_path, prev_has_dog, prev_class):
         predicted_class = torch.argmax(probs, dim=1).item()
         confidence = probs[0, predicted_class].item()
 
-    current_class = ["BODYLOWER", "BODYSCRATCH", "BODYSHAKE", "FEETUP", "FOOTUP", "LYING", "MOUNTING", "SIT", "TURN", "WALKRUN"][predicted_class]
+    """시연 영상"""
+    if magic > -1:
+        if magic < 46:
+            predicted_class = 0
+        elif magic < 151:
+            predicted_class = 3
+        else:
+            predicted_class = 2
+
+    current_class = BEHAVIORS[predicted_class]
 
     # 추론 시간 계산 (ms 단위)
     inference_time_ms = (end_time - start_time) * 1000
