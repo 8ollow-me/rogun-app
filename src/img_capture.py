@@ -18,7 +18,7 @@ def capture_frame(cap, target_dir='frames', image_name=None):
     ret, frame = cap.read()
     now = datetime.now()
     if not ret:
-        cap.set(cv.CAP_PROP_POS_FRAMES, 0)
+        cap.set(cv.CAP_PROP_POS_FRAMES, 900)
         ret, frame = cap.read()
         now = datetime.now()
 
